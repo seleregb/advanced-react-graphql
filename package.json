@@ -17,7 +17,7 @@
     "start": "SET NODE_ENV=production & SET PORT=8080 & node ./dist/backend.js"
   },
   "devDependencies": {
-    "lerna": "^3.4.3",
-    "rimraf": "^2.6.2"
+    "lerna": "^3.13.4",
+    "rimraf": "^2.6.3"
   }
 }
