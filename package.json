@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "clean": "rimraf ./node_modules",
+    "source:clean": "lerna run --parallel clean",
+    "source:install": "lerna run --parallel install",
     "bootstrap": "lerna clean -y && lerna bootstrap",
     "serve": "lerna run --parallel dev",
     "test": "lerna run --parallel test",
