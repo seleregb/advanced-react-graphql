@@ -2,12 +2,22 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { randomBytes } = require("crypto");
 const { promisify } = require("util");
+const { hasPermission } = require("../utils");
 
 const Mutation = {
   async createItem(parent, args, ctx, info) {
+    if (!ctx.request.userId) {
+      throw new Error("You must be logged in to do that!");
+    }
     const item = await ctx.db.mutation.createItem(
       {
         data: {
+          // this is how to create a relationship between the item and the user
+          user: {
+            connect: {
+              id: ctx.request.userId
+            }
+          },
           ...args
         }
       },
@@ -43,10 +53,16 @@ const Mutation = {
       `{ 
             id 
             title
+            user { id }
         }`
     );
-    // check if they have the permission to the item
+    // check if they own or have the permission to the item
+    const ownsItem = item.user.id === ctx.request.userId;
+    const hasPermissions = ctx.request.permissions.some(permission => ['ADMIN', 'ITEM_DELETE'].includes(permission));
 
+    if (!ownsItem && !hasPermissions) {
+      throw new Error("You don't have permission to do that");
+    }
     // delete the item
     return ctx.db.mutation.deleteItem({ where }, info);
   },
@@ -75,8 +91,10 @@ const Mutation = {
   },
   async signIn(parent, { email, password }, ctx, info) {
     // check if there is a user with that email
-    const user = await ctx.db.query.user({ where: {
-      email: email },
+    const user = await ctx.db.query.user({
+      where: {
+        email: email
+      }
     });
     if (!user) throw new Error(`No such user found for email ${email}`);
     // check if the password is correct
@@ -116,39 +134,70 @@ const Mutation = {
   async resetPassword(parent, args, ctx, info) {
     // check if the password match
     if (args.password !== args.confirmPassword) {
-      throw new Error('Yo passwords don\'t match');
+      throw new Error("Yo passwords don't match");
     }
     // check if its a legit reset token
     // check if its required
-    const [ user ] = await ctx.db.query.users({
+    const [user] = await ctx.db.query.users({
       where: {
         resetToken: args.resetToken,
         resetTokenExpiry_gte: Date.now() - 3600000
-      },
+      }
     });
     if (!user) {
-      throw new Error('This token is either invalid or expired!');
+      throw new Error("This token is either invalid or expired!");
     }
     // hash their new password
     const password = await bcrypt.hash(args.password, 10);
     // save the new password to the user and remove old resetToken fields
     const updatedUser = await ctx.db.mutation.updateUser({
-      where: { email: user.email},
+      where: { email: user.email },
       data: {
         password,
         resetToken: null,
-        resetTokenExpiry: null,
-      },
+        resetTokenExpiry: null
+      }
     });
     // generate jwt
-    const token = jwt.sign({ userId: updatedUser.id}, process.env.APP_SECRET);
+    const token = jwt.sign({ userId: updatedUser.id }, process.env.APP_SECRET);
     // set the jwt cookie
-    ctx.response.cookie('token', token, {
+    ctx.response.cookie("token", token, {
       httpOnly: true,
       maxAge: 1000 * 60 * 60 * 24 * 365
-    })
+    });
     // return the new user
     return updatedUser;
+  },
+  async updatePermissions(parent, args, ctx, info) {
+    // check if they are logged in
+    if (!ctx.request.userId) {
+      throw new Error("You must be logged in!");
+    }
+    // query the current user
+    const currentUser = await ctx.db.query.user(
+      {
+        where: {
+          id: ctx.request.userId
+        }
+      },
+      info
+    );
+    // check if they have permission to do this
+    hasPermission(currentUser, ["ADMIN", "PERMISSION_UPDATE"]);
+    // update the permissions
+    return ctx.db.mutation.updateUser(
+      {
+        data: {
+          permissions: {
+            set: args.permissions
+          }
+        },
+        where: {
+          id: args.userId
+        }
+      },
+      info
+    );
   }
 };
 
