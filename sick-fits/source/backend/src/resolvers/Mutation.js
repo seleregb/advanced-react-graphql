@@ -58,7 +58,9 @@ const Mutation = {
     );
     // check if they own or have the permission to the item
     const ownsItem = item.user.id === ctx.request.userId;
-    const hasPermissions = ctx.request.permissions.some(permission => ['ADMIN', 'ITEM_DELETE'].includes(permission));
+    const hasPermissions = ctx.request.user.permissions.some(permission =>
+      ["ADMIN", "ITEM_DELETE"].includes(permission)
+    );
 
     if (!ownsItem && !hasPermissions) {
       throw new Error("You don't have permission to do that");
@@ -194,6 +196,69 @@ const Mutation = {
         },
         where: {
           id: args.userId
+        }
+      },
+      info
+    );
+  },
+  async addToCart(parent, args, ctx, info) {
+    // make sure user is signed in
+    const { userId } = ctx.request;
+    // query the users current cart
+    const [existingCartItem] = await ctx.db.query.cartItems({
+      where: {
+        user: { id: userId },
+        item: { id: args.id }
+      }
+    });
+    // check if that item is already in their cart and increment by 1 if it is
+    if (existingCartItem) {
+      return ctx.db.mutation.updateCartItem(
+        {
+          where: { id: existingCartItem.id },
+          data: { quantity: existingCartItem.quantity + 1 }
+        },
+        info
+      );
+    }
+    // if its not create a fresh cart item for that user
+    return ctx.db.mutation.createCartItem(
+      {
+        data: {
+          user: {
+            connect: { id: userId }
+          },
+          item: {
+            connect: { id: args.id }
+          }
+        }
+      },
+      info
+    );
+  },
+  async removeFromCart(parent, args, ctx, info) {
+    // find the cart item
+    const cartItem = await ctx.db.query.cartItem(
+      {
+        where: {
+          id: args.id
+        }
+      },
+      `{id, user { id}}`
+    );
+    // make sure we found an item
+    if (!cartItem) {
+      throw new Error("No cart item found!");
+    }
+    // make sure they own that cart item
+    if (cartItem.user.id !== ctx.request.userId) {
+      throw new Error("Cheating huhhh!");
+    }
+    // delete that cart item
+    return ctx.db.mutation.deleteCartItem(
+      {
+        where: {
+          id: args.id
         }
       },
       info
